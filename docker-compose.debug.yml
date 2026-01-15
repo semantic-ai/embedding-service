@@ -1,0 +1,24 @@
+services:
+  embedding:
+    build: ./
+    restart: no
+    labels:
+      - logging=true
+    environment:
+      TZ: Europe/Brussels
+    command: >
+      uv run python -m debugpy
+      --listen 0.0.0.0:5678
+      --wait-for-client
+      -m uvicorn web:app --host 0.0.0.0 --port 80 --proxy-headers --timeout-keep-alive 300 --workers 1 --reload --reload-dir /app
+    ports:
+      - "8082:80"
+      - "5678:5678"
+    volumes:
+      - ./:/app
+    networks:
+      - debug
+
+networks:
+  debug:
+    external: true
