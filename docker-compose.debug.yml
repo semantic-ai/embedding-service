@@ -6,18 +6,30 @@ services:
       - logging=true
     environment:
       TZ: Europe/Brussels
+      OLLAMA_HOST: "http://embedding-ollama:11434"
+    # add --wait-for-client if you want to wait for debugger to attach before running
     command: >
       uv run python -m debugpy
       --listen 0.0.0.0:5678
-      --wait-for-client
       -m uvicorn web:app --host 0.0.0.0 --port 80 --proxy-headers --timeout-keep-alive 300 --workers 1 --reload --reload-dir /app
     ports:
       - "8082:80"
       - "5678:5678"
     volumes:
       - ./:/app
+    depends_on:
+      - embedding-ollama
     networks:
       - debug
+      - default
+  embedding-ollama:
+    image: ollama/ollama:0.14.1
+    ports:
+      #  for debugging only
+      - "11434:11434"
+    volumes:
+      - ./ollama-data:/root/.ollama
+    command: serve && pull embeddinggemma:300m
 
 networks:
   debug:
