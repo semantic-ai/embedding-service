@@ -1,2 +1,3 @@
-debugpy
-ollama
+debugpy == 1.8.19
+ollama == 0.6.1
+fastapi-crons == 2.1.1

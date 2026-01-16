@@ -1,14 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from ollama import Client
 from helpers import log, query, update, sparqlQuery, sparqlUpdate
+from web import app
+from fastapi_crons import Crons
 import os
 import time
 import uuid
-from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model
+from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule
 
 ollama_host = os.environ.get("OLLAMA_HOST", "http://embedding-ollama:11434")
 
 router = APIRouter()
+crons = Crons(app)
 
 def prefixed_log(message: str):
     log(f"APP: {message}")
@@ -29,7 +32,6 @@ sparqlUpdate.customHttpHeaders["mu-auth-sudo"] = "true"
 
 @router.get('/status')
 def get_status():
-    embed_all_targets()
     return {"status": "ok"}
 
 # endpoint for testing, normally this service reacts to tasks or target documents to embed, this service should not be exposed publicly
@@ -43,9 +45,26 @@ def get_embed(request_body: dict):
     )
     return {"embedding": embedding.embeddings[0]}
 
+currently_embedding = False
 def embed_all_targets():
+    global currently_embedding
+    if currently_embedding:
+        prefixed_log("Embedding process already running, skipping new trigger.")
+        return
+    currently_embedding = True
     for target_config in embedding_targets:
         keep_embedding_until_done(target_config)
+    currently_embedding = False
+
+@crons.cron(cron_schedule, name="embedding_cron")
+def embedding_cron():
+    embed_all_targets()
+
+@router.post('/delta')
+def handle_delta(background_tasks: BackgroundTasks):
+    # naively start embedding on any incoming delta
+    background_tasks.add_task(embed_all_targets)
+    return {"status": "ok"}
 
 def keep_embedding_until_done(target_config):
   config_name = target_config['name'] if 'name' in target_config else 'unnamed'
@@ -63,7 +82,7 @@ def generate_embeddings_for_targets(target_config):
         prefixed_log("No targets found to embed.")
         return 0
     count_todo = count_embeddings_todo(target_config)
-    prefixed_log(f"Found ${count_todo} targets to embed, starting batch of {len(batch_of_available_targets)}.")
+    prefixed_log(f"Found {count_todo} targets to embed, starting batch of {len(batch_of_available_targets)}.")
 
     embeddings = batch_embed(batch_of_available_targets)
 
@@ -91,7 +110,9 @@ def count_embeddings_todo(target_config):
       SELECT (COUNT(DISTINCT(?target)) AS ?count) WHERE {{
         {target_config['filter']}
         FILTER NOT EXISTS {{
-          ?target {target_config['embedding_predicate']} ?existingEmbedding .
+          GRAPH <{embedding_graph}> {{
+            ?target <{target_config['embedding_predicate']}> ?existingEmbedding .
+          }}
         }}
       }}
     """)
@@ -111,7 +132,7 @@ def create_embedding_lists(embedding):
 
       INSERT DATA {{
         GRAPH <{embedding_graph}> {{
-          <${embedding_uri}> a ext:EmbeddingVector ;
+          <{embedding_uri}> a ext:EmbeddingVector ;
                 ext:hasChunkedValues {build_chunk_uri(embedding_uuid, 0)} .
           {'\n'.join(chunk_triples)}
         }}
@@ -148,8 +169,8 @@ def store_embeddings(target_config, embeddings):
 
     update(f"""
       INSERT {{
-        GRAPH ?g {{
-          ?target {predicate} ?embedding .
+        GRAPH <{embedding_graph}> {{
+          ?target <{predicate}> ?embedding .
         }}
       }}
       WHERE {{
@@ -165,10 +186,12 @@ def store_embeddings(target_config, embeddings):
 def find_embedding_targets(targets):
     # unsafe inclusion of variables in query, but this comes from config file, not user input
     available_targets = query(f"""
-      SELECT ?target ?content WHERE {{
+      SELECT DISTINCT ?target ?content WHERE {{
         {targets['filter']}
         FILTER NOT EXISTS {{
-          ?target {targets['embedding_predicate']} ?existingEmbedding .
+          GRAPH <{embedding_graph}> {{
+            ?target <{targets['embedding_predicate']}> ?existingEmbedding .
+          }}
         }}
       }} limit {batch_size}
     """)
