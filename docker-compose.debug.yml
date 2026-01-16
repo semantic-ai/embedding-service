@@ -7,6 +7,7 @@ services:
     environment:
       TZ: Europe/Brussels
       OLLAMA_HOST: "http://embedding-ollama:11434"
+      LOG_SPARQL_ALL: "false"
     # add --wait-for-client if you want to wait for debugger to attach before running
     command: >
       uv run python -m debugpy
