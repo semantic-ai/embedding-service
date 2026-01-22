@@ -6,7 +6,7 @@ from fastapi_crons import Crons
 import os
 import time
 import uuid
-from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule
+from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule, embedding_null
 
 ollama_host = os.environ.get("OLLAMA_HOST", "http://embedding-ollama:11434")
 
@@ -84,7 +84,8 @@ def generate_embeddings_for_targets(target_config):
     count_todo = count_embeddings_todo(target_config)
     prefixed_log(f"Found {count_todo} targets to embed, starting batch of {len(batch_of_available_targets)}.")
 
-    embeddings = batch_embed(batch_of_available_targets)
+    target_content_mapping = fetch_content_for_targets(batch_of_available_targets, target_config)
+    embeddings = batch_embed(target_content_mapping)
 
     prefixed_log(f"Storing {len(embeddings)} embeddings...")
 
@@ -92,18 +93,71 @@ def generate_embeddings_for_targets(target_config):
     prefixed_log(f"Stored {len(embeddings)} embeddings.")
     return len(embeddings)
 
-def batch_embed(found_targets):
-    prefixed_log(f"Generating embeddings for {len(found_targets)} targets...")
+def batch_embed(target_content_mapping):
+    prefixed_log(f"Generating embeddings for {len(target_content_mapping)} targets...")
     start = time.time()
+    targets_with_content = []
+    content_for_targets = []
+    targets_without_content = []
+
+    for target in target_content_mapping.keys():
+        content = target_content_mapping[target]
+        if len(content.strip()):
+            targets_with_content.append(target)
+            content_for_targets.append(content)
+        else:
+            targets_without_content.append(target)
+
     embeddings = ollama.embed(
         model=embedding_model,
-        input=[result['content'] for result in found_targets]
+        input=content_for_targets
     )
 
     end = time.time()
     prefixed_log(f"Generated embeddings in {end - start} seconds.")
 
-    return [{ 'target': found_targets[i]['target'], 'embedding': embeddings.embeddings[i]} for i in range(len(found_targets))]
+    result = []
+    for index, target in enumerate(targets_with_content):
+        result.append({"target": target, "embedding": embeddings.embeddings[index]})
+
+    for target in targets_without_content:
+        result.append({"target": target, "embedding": None})
+
+    return result
+
+def fetch_content_for_targets(found_targets, target_config):
+    target_values = [f"<{t}>" for t in found_targets]
+    target_values_str = "\n".join(target_values)
+    # no limit here, assuming our batch filtering is good enough and targets don't have 1000s of content values
+    content_result = query(f"""
+      SELECT ?target ?content ?content_index WHERE {{
+        VALUES ?target {{
+            {target_values_str}
+        }}
+        {target_config["content_path"]}
+        BIND(IF(!BOUND(?index), 1, ?index) AS ?content_index)
+      }}
+    """)
+    target_content_map = {}
+    for result in content_result['results']['bindings']:
+        target = result["target"]["value"]
+        content = result["content"]["value"]
+        index = result["content_index"]["value"]
+        if not target_content_map.get(target):
+            target_content_map[target] = []
+        target_content_map[target].append({"content": content, "index": "index"})
+
+    # possibly a found target has no content value. in that case, let's add a dummy one
+    for target in found_targets:
+        if not target_content_map.get(target):
+            target_content_map[target] = [{"content": "", "index": 1}]
+
+    for target in target_content_map.keys():
+        sorted_content = sorted(target_content_map[target], key=lambda x: x["index"])
+        joined_content = "\n".join([c["content"] for c in sorted_content])
+        target_content_map[target] = joined_content
+
+    return target_content_map
 
 def count_embeddings_todo(target_config):
     count_result = query(f"""
@@ -121,6 +175,9 @@ def count_embeddings_todo(target_config):
 # the embedding vector as a single string can be too large for our triple store to handle, so
 # it's split into linked lists of size defined by the config
 def create_embedding_lists(embedding):
+    if embedding is None:
+        return embedding_null
+
     embedding_uuid = str(uuid.uuid4())
     embedding_uri = "http://mu.semte.ch/vocabularies/ext/embeddingVector/" + embedding_uuid
     chunks = [ embedding[i:i+embedding_vector_chunk_size] for i in range(0, len(embedding), embedding_vector_chunk_size) ]
@@ -186,7 +243,7 @@ def store_embeddings(target_config, embeddings):
 def find_embedding_targets(targets):
     # unsafe inclusion of variables in query, but this comes from config file, not user input
     available_targets = query(f"""
-      SELECT DISTINCT ?target ?content WHERE {{
+      SELECT DISTINCT ?target WHERE {{
         {targets['filter']}
         FILTER NOT EXISTS {{
           GRAPH <{embedding_graph}> {{
@@ -196,4 +253,6 @@ def find_embedding_targets(targets):
       }} limit {batch_size}
     """)
 
-    return [{'target': row['target']['value'], 'content': row['content']['value']} for row in available_targets['results']['bindings']]
+    return [row['target']['value'] for row in available_targets['results']['bindings']]
+
+embed_all_targets()
