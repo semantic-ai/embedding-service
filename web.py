@@ -204,8 +204,11 @@ def build_list_item_triples(embedding_uuid, chunks, i):
     next_chunk_uri = None
     if i < len(chunks) - 1:
         next_chunk_uri = build_chunk_uri(embedding_uuid, i+1)
+    # need ext:mainListIndex to efficiently get the list parts in order :(
+    # this is because sparql doesn't support keeping index in its path expressions atm
     return f"""
       {chunk_uri} a rdf:List ;
+            ext:mainListIndex {i} ;
             rdf:first "{chunk_values}" ;
             {f"rdf:rest {next_chunk_uri} ." if next_chunk_uri else "rdf:rest rdf:nil ."}
     """
