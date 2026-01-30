@@ -6,7 +6,7 @@ from fastapi_crons import Crons
 import os
 import time
 import uuid
-from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule, embedding_null
+from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule, embedding_null, max_content_len
 
 ollama_host = os.environ.get("OLLAMA_HOST", "http://embedding-ollama:11434")
 
@@ -141,11 +141,11 @@ def fetch_content_for_targets(found_targets, target_config):
     target_content_map = {}
     for result in content_result['results']['bindings']:
         target = result["target"]["value"]
-        content = result["content"]["value"]
+        content = (result["content"]["value"] or "")[:max_content_len]
         index = result["content_index"]["value"]
         if not target_content_map.get(target):
             target_content_map[target] = []
-        target_content_map[target].append({"content": content, "index": "index"})
+        target_content_map[target].append({"content": content, "index": index})
 
     # possibly a found target has no content value. in that case, let's add a dummy one
     for target in found_targets:

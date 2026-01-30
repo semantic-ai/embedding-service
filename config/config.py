@@ -33,7 +33,8 @@ embedding_targets = [
   }
 ]
 
-batch_size = 100
+max_content_len = 2000
+batch_size = 2000
 embedding_vector_chunk_size = 50
 embedding_graph = "http://mu.semte.ch/graphs/public"
 embedding_null = "http://mu.semte.ch/vocabularies/ext/embeddingVector/null"

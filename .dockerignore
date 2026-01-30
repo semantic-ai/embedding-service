@@ -1,0 +1,5 @@
+.venv
+.git
+.nox
+ollama-data
+data
