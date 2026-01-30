@@ -6,7 +6,7 @@ from fastapi_crons import Crons
 import os
 import time
 import uuid
-from config.config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule, embedding_null, max_content_len
+from config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule, embedding_null, max_content_len
 
 ollama_host = os.environ.get("OLLAMA_HOST", "http://embedding-ollama:11434")
 
@@ -77,6 +77,7 @@ def keep_embedding_until_done(target_config):
   prefixed_log(f"Completed embedding process for target config {config_name}")
 
 def generate_embeddings_for_targets(target_config):
+    start = time.time()
     batch_of_available_targets = find_embedding_targets(target_config)
     if len(batch_of_available_targets) == 0:
         prefixed_log("No targets found to embed.")
@@ -90,7 +91,8 @@ def generate_embeddings_for_targets(target_config):
     prefixed_log(f"Storing {len(embeddings)} embeddings...")
 
     store_embeddings(target_config, embeddings)
-    prefixed_log(f"Stored {len(embeddings)} embeddings.")
+    end = time.time()
+    prefixed_log(f"Stored {len(embeddings)} embeddings in {end - start} seconds.")
     return len(embeddings)
 
 def batch_embed(target_content_mapping):

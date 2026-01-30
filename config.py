@@ -1,10 +1,12 @@
 embedding_targets = [
   {
+    "name": "expressions gent",
     "filter": """?target a <http://data.europa.eu/eli/ontology#Expression> .""",
     "content_path": """?target <https://data.europarl.europa.eu/def/epvoc#expressionContent> ?content .""",
     "embedding_predicate": "http://mu.semte.ch/vocabularies/ext/embeddingVector"
   },
   {
+    "name": "expressions freiburg",
     "filter": """?target a  <https://schema.oparl.org/Organization> .""",
     "content_path": """
       {
