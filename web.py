@@ -45,16 +45,22 @@ def get_embed(request_body: dict):
     )
     return {"embedding": embedding.embeddings[0]}
 
-currently_embedding = False
+currently_embedding = None
 def embed_all_targets():
     global currently_embedding
+    now = time.time
     if currently_embedding:
         prefixed_log("Embedding process already running, skipping new trigger.")
+        currently_embedding = now
         return
-    currently_embedding = True
+    currently_embedding = now
     for target_config in embedding_targets:
         keep_embedding_until_done(target_config)
-    currently_embedding = False
+    if currently_embedding == now:
+        currently_embedding = None
+    else:
+        currently_embedding = None
+        embed_all_targets()
 
 @crons.cron(cron_schedule, name="embedding_cron")
 def embedding_cron():
