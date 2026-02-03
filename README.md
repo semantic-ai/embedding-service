@@ -24,7 +24,18 @@ Note: the config included by this service can be overridden by mounting config.p
 `cron_schedule`: the cron string to use for automatically scheduling embedding runs, even if no deltas arrive
 
 ## Model
+
 Embeddings created by this service are stored as instances of the type `<http://mu.semte.ch/vocabularies/ext/EmbeddingVector>`. Because the vectors themselves can be quite large (so they can no longer be stored as single string in virtuoso), they are stored in chunks in an `rdf:List`. The embedding vector points to its first chunk using `<http://mu.semte.ch/vocabularies/ext/hasChunkedValues>`, which then points to its next chunk using `rdf:rest` and its actual value using `rdf:first`. The final chunk points to `rdf:nil` as its `rdf:rest`. To easily order the chunks when required, every chunk has a sortable `<http://mu.semte.ch/vocabularies/ext/mainListIndex>` value.
+
+# Multiple string values
+
+Multiple values for a `content_path` in an `embedding_target`result in multiple embedding vectors being created, one for each value. In mu-search, these values will be averaged and normalized when they are added to elastic.
+
+## Large sting values
+
+Large string values will be cut off by the `max_content_len` property. This means only the first `max_content_len` characters of long strings are actually taken into account when generating embedding vectors. If this proves problematic, one can split the values of such instances with long strings into 'chunks' and index the chunks instead of the instances. Users of the search service should then be wary that they are searching on chunks and should still follow the path back to the original instance.
+
+Chunking in such a way is not included in this service and should be done by a separate service.
 
 ## Handling updates
 
