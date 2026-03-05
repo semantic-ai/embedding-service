@@ -266,4 +266,6 @@ def find_embedding_targets(targets):
 
     return [row['target']['value'] for row in available_targets['results']['bindings']]
 
-embed_all_targets()
+if os.environ.get('EMBED_ON_STARTUP'):
+    embed_all_targets()
+    
