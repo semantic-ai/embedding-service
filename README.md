@@ -23,6 +23,11 @@ Note: the config included by this service can be overridden by mounting config.p
 `embedding_model`: the ollama model to use for embeddings
 `cron_schedule`: the cron string to use for automatically scheduling embedding runs, even if no deltas arrive
 
+environment:
+
+- `OLLAMA_HOST`: the url of the ollama service to use, defaults to http://embedding-ollama:11434
+- `EMBED_ON_STARTUP`: if not nil, start embeddings on startup
+
 ## Model
 
 Embeddings created by this service are stored as instances of the type `<http://mu.semte.ch/vocabularies/ext/EmbeddingVector>`. Because the vectors themselves can be quite large (so they can no longer be stored as single string in virtuoso), they are stored in chunks in an `rdf:List`. The embedding vector points to its first chunk using `<http://mu.semte.ch/vocabularies/ext/hasChunkedValues>`, which then points to its next chunk using `rdf:rest` and its actual value using `rdf:first`. The final chunk points to `rdf:nil` as its `rdf:rest`. To easily order the chunks when required, every chunk has a sortable `<http://mu.semte.ch/vocabularies/ext/mainListIndex>` value.
