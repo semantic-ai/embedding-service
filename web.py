@@ -1,14 +1,11 @@
 from fastapi import APIRouter, BackgroundTasks
-from ollama import Client
+from langchain.embeddings import init_embeddings
 from helpers import log, query, update, sparqlQuery, sparqlUpdate
 from web import app
 from fastapi_crons import Crons
-import os
 import time
 import uuid
-from config import embedding_targets, batch_size, embedding_vector_chunk_size, embedding_graph, embedding_model, cron_schedule, embedding_null, max_content_len
-
-ollama_host = os.environ.get("OLLAMA_HOST", "http://embedding-ollama:11434")
+from config import config, embedding_targets
 
 router = APIRouter()
 crons = Crons(app)
@@ -16,15 +13,16 @@ crons = Crons(app)
 def prefixed_log(message: str):
     log(f"APP: {message}")
 
-prefixed_log(f"Ollama host set to: {ollama_host}")
+def build_embeddings_model():
+    kwargs = {}
+    if config.embedding_base_url:
+        kwargs["base_url"] = config.embedding_base_url
+    if config.embedding_api_key:
+        kwargs["api_key"] = config.embedding_api_key.get_secret_value()
+    prefixed_log(f"Initializing embeddings model: {config.embedding_model}")
+    return init_embeddings(config.embedding_model, **kwargs)
 
-ollama = Client(
-    host=ollama_host
-)
-
-prefixed_log("Pulling embedding model from Ollama...")
-embedding = ollama.pull(embedding_model)
-log("Embedding model pulled successfully.")
+embeddings_model = build_embeddings_model()
 
 # we need to use sudo as we will be modifying data all across the database without a user triggering a request
 sparqlQuery.customHttpHeaders["mu-auth-sudo"] = "true"
@@ -39,11 +37,8 @@ def get_status():
 def get_embed(request_body: dict):
     input_string = request_body.get("input", "")
 
-    embedding = ollama.embed(
-        model=embedding_model,
-        input=[input_string]
-    )
-    return {"embedding": embedding.embeddings[0]}
+    result = embeddings_model.embed_query(input_string)
+    return {"embedding": result}
 
 currently_embedding = None
 def embed_all_targets():
@@ -62,7 +57,7 @@ def embed_all_targets():
         currently_embedding = None
         embed_all_targets()
 
-@crons.cron(cron_schedule, name="embedding_cron")
+@crons.cron(config.cron_schedule, name="embedding_cron")
 def embedding_cron():
     embed_all_targets()
 
@@ -116,17 +111,14 @@ def batch_embed(target_content_mapping):
         else:
             targets_without_content.append(target)
 
-    embeddings = ollama.embed(
-        model=embedding_model,
-        input=content_for_targets
-    )
+    embedding_vectors = embeddings_model.embed_documents(content_for_targets)
 
     end = time.time()
     prefixed_log(f"Generated embeddings in {end - start} seconds.")
 
     result = []
     for index, target in enumerate(targets_with_content):
-        result.append({"target": target, "embedding": embeddings.embeddings[index]})
+        result.append({"target": target, "embedding": embedding_vectors[index]})
 
     for target in targets_without_content:
         result.append({"target": target, "embedding": None})
@@ -149,7 +141,7 @@ def fetch_content_for_targets(found_targets, target_config):
     target_content_map = {}
     for result in content_result['results']['bindings']:
         target = result["target"]["value"]
-        content = (result["content"]["value"] or "")[:max_content_len]
+        content = (result["content"]["value"] or "")[:config.max_content_len]
         index = result["content_index"]["value"]
         if not target_content_map.get(target):
             target_content_map[target] = []
@@ -172,7 +164,7 @@ def count_embeddings_todo(target_config):
       SELECT (COUNT(DISTINCT(?target)) AS ?count) WHERE {{
         {target_config['filter']}
         FILTER NOT EXISTS {{
-          GRAPH <{embedding_graph}> {{
+          GRAPH <{config.embedding_graph}> {{
             ?target <{target_config['embedding_predicate']}> ?existingEmbedding .
           }}
         }}
@@ -184,11 +176,11 @@ def count_embeddings_todo(target_config):
 # it's split into linked lists of size defined by the config
 def create_embedding_lists(embedding):
     if embedding is None:
-        return embedding_null
+        return config.embedding_null
 
     embedding_uuid = str(uuid.uuid4())
     embedding_uri = "http://mu.semte.ch/vocabularies/ext/embeddingVector/" + embedding_uuid
-    chunks = [ embedding[i:i+embedding_vector_chunk_size] for i in range(0, len(embedding), embedding_vector_chunk_size) ]
+    chunks = [ embedding[i:i+config.embedding_vector_chunk_size] for i in range(0, len(embedding), config.embedding_vector_chunk_size) ]
     chunk_triples =[ build_list_item_triples(embedding_uuid, chunks, i) for i in range(len(chunks)) ]
 
     update(f"""
@@ -196,7 +188,7 @@ def create_embedding_lists(embedding):
       PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
 
       INSERT DATA {{
-        GRAPH <{embedding_graph}> {{
+        GRAPH <{config.embedding_graph}> {{
           <{embedding_uri}> a ext:EmbeddingVector ;
                 ext:hasChunkedValues {build_chunk_uri(embedding_uuid, 0)} .
           {'\n'.join(chunk_triples)}
@@ -237,7 +229,7 @@ def store_embeddings(target_config, embeddings):
 
     update(f"""
       INSERT {{
-        GRAPH <{embedding_graph}> {{
+        GRAPH <{config.embedding_graph}> {{
           ?target <{predicate}> ?embedding .
         }}
       }}
@@ -257,15 +249,15 @@ def find_embedding_targets(targets):
       SELECT DISTINCT ?target WHERE {{
         {targets['filter']}
         FILTER NOT EXISTS {{
-          GRAPH <{embedding_graph}> {{
+          GRAPH <{config.embedding_graph}> {{
             ?target <{targets['embedding_predicate']}> ?existingEmbedding .
           }}
         }}
-      }} limit {batch_size}
+      }} limit {config.batch_size}
     """)
 
     return [row['target']['value'] for row in available_targets['results']['bindings']]
 
-if os.environ.get('EMBED_ON_STARTUP'):
+if config.embed_on_startup:
     embed_all_targets()
     
