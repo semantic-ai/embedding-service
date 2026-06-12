@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks
 from langchain.embeddings import init_embeddings
-from helpers import log, query, update, sparqlQuery, sparqlUpdate
+from helpers import log, query, update
+from escape_helpers import sparql_escape_uri, sparql_escape_string
 from web import app
 from fastapi_crons import Crons
 import time
@@ -23,10 +24,6 @@ def build_embeddings_model():
     return init_embeddings(config.embedding_model, **kwargs)
 
 embeddings_model = build_embeddings_model()
-
-# we need to use sudo as we will be modifying data all across the database without a user triggering a request
-sparqlQuery.customHttpHeaders["mu-auth-sudo"] = "true"
-sparqlUpdate.customHttpHeaders["mu-auth-sudo"] = "true"
 
 @router.get('/status')
 def get_status():
@@ -126,7 +123,7 @@ def batch_embed(target_content_mapping):
     return result
 
 def fetch_content_for_targets(found_targets, target_config):
-    target_values = [f"<{t}>" for t in found_targets]
+    target_values = [f"{sparql_escape_uri(t)}" for t in found_targets]
     target_values_str = "\n".join(target_values)
     # no limit here, assuming our batch filtering is good enough and targets don't have 1000s of content values
     content_result = query(f"""
@@ -137,7 +134,7 @@ def fetch_content_for_targets(found_targets, target_config):
         {target_config["content_path"]}
         BIND(IF(!BOUND(?index), 1, ?index) AS ?content_index)
       }}
-    """)
+    """, sudo=True)
     target_content_map = {}
     for result in content_result['results']['bindings']:
         target = result["target"]["value"]
@@ -164,12 +161,12 @@ def count_embeddings_todo(target_config):
       SELECT (COUNT(DISTINCT(?target)) AS ?count) WHERE {{
         {target_config['filter']}
         FILTER NOT EXISTS {{
-          GRAPH <{config.embedding_graph}> {{
-            ?target <{target_config['embedding_predicate']}> ?existingEmbedding .
+          GRAPH {sparql_escape_uri(config.embedding_graph)} {{
+            ?target {sparql_escape_uri(target_config['embedding_predicate'])} ?existingEmbedding .
           }}
         }}
       }}
-    """)
+    """, sudo=True)
     return int(count_result['results']['bindings'][0]['count']['value'])
 
 # the embedding vector as a single string can be too large for our triple store to handle, so
@@ -188,13 +185,13 @@ def create_embedding_lists(embedding):
       PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
 
       INSERT DATA {{
-        GRAPH <{config.embedding_graph}> {{
-          <{embedding_uri}> a ext:EmbeddingVector ;
+        GRAPH {sparql_escape_uri(config.embedding_graph)} {{
+          {sparql_escape_uri(embedding_uri)} a ext:EmbeddingVector ;
                 ext:hasChunkedValues {build_chunk_uri(embedding_uuid, 0)} .
           {'\n'.join(chunk_triples)}
         }}
       }}
-    """)
+    """, sudo=True)
     return embedding_uri
 
 
@@ -209,14 +206,12 @@ def build_list_item_triples(embedding_uuid, chunks, i):
     return f"""
       {chunk_uri} a rdf:List ;
             ext:mainListIndex {i} ;
-            rdf:first "{chunk_values}" ;
+            rdf:first {sparql_escape_string(chunk_values)} ;
             {f"rdf:rest {next_chunk_uri} ." if next_chunk_uri else "rdf:rest rdf:nil ."}
     """
 
 def build_chunk_uri(embedding_uuid, chunk_index):
-    return f"<http://mu.semte.ch/vocabularies/ext/embeddingVector/{embedding_uuid}/chunk/{chunk_index}>"
-
-
+    return sparql_escape_uri(f"http://mu.semte.ch/vocabularies/ext/embeddingVector/{embedding_uuid}/chunk/{chunk_index}")
 
 
 def store_embeddings(target_config, embeddings):
@@ -224,13 +219,13 @@ def store_embeddings(target_config, embeddings):
 
     embedding_uris = [create_embedding_lists(item['embedding']) for item in embeddings]
 
-    embedding_values = [ f"(<{embeddings[i]['target']}> <{embedding_uris[i]}>)" for i in range(len(embeddings)) ]
+    embedding_values = [ f"({sparql_escape_uri(embeddings[i]['target'])} {sparql_escape_uri(embedding_uris[i])})" for i in range(len(embeddings)) ]
     embedding_values_s = "\n          ".join(embedding_values)
 
     update(f"""
       INSERT {{
-        GRAPH <{config.embedding_graph}> {{
-          ?target <{predicate}> ?embedding .
+        GRAPH {sparql_escape_uri(config.embedding_graph)} {{
+          ?target {sparql_escape_uri(predicate)} ?embedding .
         }}
       }}
       WHERE {{
@@ -241,7 +236,7 @@ def store_embeddings(target_config, embeddings):
           ?target a ?thing .
         }}
       }}
-    """)
+    """, sudo=True)
 
 def find_embedding_targets(targets):
     # unsafe inclusion of variables in query, but this comes from config file, not user input
@@ -249,12 +244,12 @@ def find_embedding_targets(targets):
       SELECT DISTINCT ?target WHERE {{
         {targets['filter']}
         FILTER NOT EXISTS {{
-          GRAPH <{config.embedding_graph}> {{
-            ?target <{targets['embedding_predicate']}> ?existingEmbedding .
+          GRAPH {sparql_escape_uri(config.embedding_graph)} {{
+            ?target {sparql_escape_uri(targets['embedding_predicate'])} ?existingEmbedding .
           }}
         }}
       }} limit {config.batch_size}
-    """)
+    """, sudo=True)
 
     return [row['target']['value'] for row in available_targets['results']['bindings']]
 
