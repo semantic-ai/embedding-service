@@ -16,7 +16,8 @@ def prefixed_log(message: str):
 
 def build_embeddings_model():
     kwargs = {}
-    if config.embedding_base_url:
+    provider = config.embedding_model.split(":")[0] if ":" in config.embedding_model else ""
+    if config.embedding_base_url and provider == "ollama":
         kwargs["base_url"] = config.embedding_base_url
     if config.embedding_api_key:
         kwargs["api_key"] = config.embedding_api_key.get_secret_value()
