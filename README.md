@@ -20,13 +20,48 @@ Note: the config included by this service can be overridden by mounting config.p
 `embedding_vector_chunk_size`: the embedding vectors can become too large to be stored in virtuoso, so they are broken up into rdf:Lists. This variable defines the number of dimensions per chunk (last chunk will be smaller or equal)
 `embedding_graph`: the graph to write the embeddings to
 `embedding_null`: to ensure an instance is marked as processed, even if it doesn't have content that can be turned into an embedding vector, this uri is used as an embedding value for such unprocessable entities (e.g. no match for `content_path`)
-`embedding_model`: the ollama model to use for embeddings
+`embedding_model`: the model to use for embeddings, in `provider:model` format (e.g. `ollama:embeddinggemma:300m-qat-q4_0` or `mistralai:mistral-embed`)
+`embedding_base_url`: the base URL for the embedding provider (defaults to `http://embedding-ollama:11434`, only used for ollama)
+`embedding_api_key`: API key for remote embedding providers (e.g. Mistral)
 `cron_schedule`: the cron string to use for automatically scheduling embedding runs, even if no deltas arrive
 
 environment:
 
-- `OLLAMA_HOST`: the url of the ollama service to use, defaults to http://embedding-ollama:11434
+- `EMBEDDING_MODEL`: the model to use (default: `ollama:embeddinggemma:300m-qat-q4_0`)
+- `EMBEDDING_BASE_URL`: base URL for the embedding provider (default: `http://embedding-ollama:11434`)
+- `EMBEDDING_API_KEY`: API key for remote providers
 - `EMBED_ON_STARTUP`: if not nil, start embeddings on startup
+
+## Running Modes
+
+### Ollama (local model)
+
+By default, the service is configured to use a local Ollama instance. No extra configuration is needed beyond ensuring the Ollama service is reachable.
+
+```yaml
+services:
+  embedding:
+    environment:
+      EMBEDDING_MODEL: "ollama:embeddinggemma:300m-qat-q4_0"
+      # EMBEDDING_BASE_URL defaults to http://embedding-ollama:11434
+  embedding-ollama:
+    image: ollama/ollama:0.14.1
+    volumes:
+      - ./ollama-data:/root/.ollama
+    command: serve && pull embeddinggemma:300m
+```
+
+### Remote model (e.g. Mistral)
+
+To use a remote embedding provider such as Mistral, set `EMBEDDING_MODEL` to the provider-prefixed model name and provide the API key. The `base_url` parameter is only passed for ollama models, so no override is needed.
+
+```yaml
+services:
+  embedding:
+    environment:
+      EMBEDDING_MODEL: "mistralai:mistral-embed"
+      EMBEDDING_API_KEY: "<your-api-key>"
+```
 
 ## Model
 

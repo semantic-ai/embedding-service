@@ -1,3 +1,8 @@
-debugpy == 1.8.19
-ollama == 0.6.1
-fastapi-crons == 2.1.1
+debugpy==1.8.19
+ollama==0.6.1
+fastapi-crons==2.1.1
+pydantic-settings==2.12.0
+pydantic==2.12.5
+langchain==1.2.13
+langchain-mistralai==1.1.2
+langchain-ollama==1.0.1
