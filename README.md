@@ -48,7 +48,7 @@ services:
     image: ollama/ollama:0.14.1
     volumes:
       - ./ollama-data:/root/.ollama
-    command: serve && pull embeddinggemma:300m
+    command: serve && pull embeddinggemma:300m-qat-q4_0
 ```
 
 ### Remote model (e.g. Mistral)
